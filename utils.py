@@ -40,13 +40,15 @@ def tokenize(
     tokenizer: PreTrainedTokenizerBase,
     prompt: str | list[int] | Int[TT, "seq"],
     device: str = "cpu",
+    check_special_tokens: bool = True,
 ) -> dict[str, Int[TT, "batch seq"]]:
     if isinstance(prompt, str):
         result = tokenizer(prompt, return_tensors="pt")
     else:
         result = tokenizer(tokenizer.decode(prompt), return_tensors="pt")
     result["labels"] = result["input_ids"]
-    assert (result["input_ids"] < len(tokenizer) - 2).all()
+    if check_special_tokens:
+        assert (result["input_ids"] < len(tokenizer) - 2).all(), "Special tokens might be present"
     return {name: value.to(device) for name, value in result.items()}
 
 
@@ -93,7 +95,9 @@ def logprobs_to_losses(
 
 @typed
 def get_loss(
-    model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, prompt: str
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    prompt: str | list[int] | Int[TT, "seq"],
 ) -> float:
     input_ids = tokenize(tokenizer, prompt, device=module_device(model))
     return model(**input_ids).loss.item()
