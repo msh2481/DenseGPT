@@ -1,0 +1,15 @@
+params:
+- params.yaml
+- dvclive/params.yaml
+stages:
+  train:
+    cmd: python3 train.py
+    deps:
+    - params.yaml
+    - train.py
+    - gpt.py
+metrics:
+- dvclive/metrics.json
+plots:
+- dvclive/plots/metrics:
+    x: step
