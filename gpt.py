@@ -222,7 +222,9 @@ class DenseGPTModel(GPTNeoModel):
                     outputs[2 if use_cache else 1],
                 )
 
-        assert connection_idx == len(self.connections)
+        if self.use_dense:
+            assert connection_idx == len(self.connections)
+
         hidden_states = self.ln_f(hidden_states)
 
         hidden_states = hidden_states.view(output_shape)
