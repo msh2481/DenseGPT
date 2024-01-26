@@ -1,0 +1,17 @@
+schema: '2.0'
+stages:
+  train:
+    cmd: python3 train.py
+    deps:
+    - path: gpt.py
+      hash: md5
+      md5: bce66abb65231a6fe3789dfae2ba03c3
+      size: 15982
+    - path: params.yaml
+      hash: md5
+      md5: 9036881ff419fb36b2a4fce29feeed11
+      size: 146
+    - path: train.py
+      hash: md5
+      md5: 06cfa69e5909007a8b00e1d70bd57a40
+      size: 2190

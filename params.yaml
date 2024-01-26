@@ -1,7 +1,7 @@
-model_name: 
-dataset_name: Mlxa/flat_shuffle
-tokenizer_name: Mlxa/brackets-nested
-use_dense: True
-lr: 0.001
 batch_size: 8
+dataset_name: Mlxa/flat_shuffle
 dataset_size: 60000
+lr: 0.001
+model_name: null
+tokenizer_name: Mlxa/brackets-nested
+use_dense: true

@@ -26,7 +26,7 @@ warmup_steps: 0
 log_level: passive
 log_level_replica: warning
 log_on_each_node: true
-logging_dir: trainer/runs/Jan26_11-28-09_laptop
+logging_dir: trainer/runs/Jan26_11-14-06_06071fb72191
 logging_strategy: steps
 logging_first_step: false
 logging_steps: 50
@@ -34,7 +34,7 @@ logging_nan_inf_filter: true
 save_strategy: steps
 save_steps: 500
 save_total_limit: 1
-save_safetensors: false
+save_safetensors: true
 save_on_each_node: false
 no_cuda: false
 use_cpu: false
@@ -67,7 +67,6 @@ load_best_model_at_end: false
 metric_for_best_model:
 greater_is_better:
 ignore_data_skip: false
-sharded_ddp: []
 fsdp: []
 fsdp_min_num_params: 0
 fsdp_config:
@@ -97,6 +96,7 @@ hub_token: <HUB_TOKEN>
 hub_private_repo: false
 hub_always_push: false
 gradient_checkpointing: false
+gradient_checkpointing_kwargs:
 include_inputs_for_metrics: false
 fp16_backend: auto
 push_to_hub_model_id:
@@ -112,3 +112,6 @@ torch_compile: false
 torch_compile_backend:
 torch_compile_mode:
 dispatch_batches:
+split_batches: false
+include_tokens_per_second: false
+neftune_noise_alpha:
