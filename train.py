@@ -1,10 +1,21 @@
-from typing import Mapping
+from typing import Mapping, Literal
 
+import torch as t
+import torch.nn.functional as F
 import yaml  # type: ignore
 from beartype import beartype as typed
 from datasets import load_dataset  # type: ignore
+from datasets import Dataset
 from dvclive.huggingface import DVCLiveCallback  # type: ignore
-from transformers import AutoTokenizer, Trainer, TrainingArguments  # type: ignore
+from jaxtyping import Float, Int
+from torch import Tensor as TT
+from transformers import (  # type: ignore
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    Trainer,
+    TrainingArguments,
+)
+from trl import DPOTrainer  # type: ignore
 
 from gpt import DenseGPTConfig, DenseGPTForCausalLM
 
@@ -76,3 +87,77 @@ trainer = Trainer(
 )
 trainer.add_callback(DVCLiveCallback())
 trainer.train()
+
+"""
+train_dataset = Dataset.from_dict({
+    "prompt": [
+        "hello",
+        "how are you",
+    ],
+    "chosen": [
+        "hi nice to meet you",
+        "I am fine",
+    ],
+    "rejected": [
+        "leave me alone",
+        "I am not fine",
+    ],
+})
+"""
+
+
+def dpo(
+    prompt_chosen_rejected: dict[str, list[str]],
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    batch_size: int,
+    lr: float,
+    beta: float,
+    max_steps: int,
+    loss_type: Literal["sigmoid", "ipo"] = "ipo",
+):
+    train_dataset = Dataset.from_dict(prompt_chosen_rejected)
+    max_steps = 100
+
+    training_args = TrainingArguments(
+        per_device_train_batch_size=batch_size,
+        max_steps=max_steps,
+        num_train_epochs=100,
+        remove_unused_columns=False,
+        learning_rate=lr,
+        evaluation_strategy="steps",
+        logging_first_step=True,
+        logging_steps=10,
+        output_dir="trainer",
+        optim="adamw_torch",
+        warmup_steps=15,
+        report_to="none",
+        save_total_limit=1,
+        # bf16=True,
+    )
+
+    dpo_trainer = DPOTrainer(
+        model,
+        # ref_model,
+        args=training_args,
+        beta=beta,
+        loss_type=loss_type,
+        train_dataset=train_dataset,
+        tokenizer=tokenizer,
+        max_length=128,
+        max_target_length=128,
+        max_prompt_length=128,
+    )
+
+    dpo_trainer.train()
+
+
+"""
+Plan:
+Take TinyStories texts as positive examples, model generated texts as negative (pairing them arbitrarily) and set prompts to be empty, or some fixed string.
+
+For several epochs:
+    Run DPO
+    Updated some (e.g. each with probability 0.1) of the generated texts with new ones
+    Observe what happens to average loss on dataset samples, on self-generated samples and on corrupted dataset samples (which should indicate how stable the model is)
+"""
