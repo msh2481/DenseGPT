@@ -1,4 +1,5 @@
-from typing import Mapping, Literal
+import json
+from typing import Literal, Mapping
 
 import torch as t
 import torch.nn.functional as F
@@ -6,18 +7,18 @@ import yaml  # type: ignore
 from beartype import beartype as typed
 from datasets import load_dataset  # type: ignore
 from datasets import Dataset
-from dvclive.huggingface import DVCLiveCallback  # type: ignore
 from jaxtyping import Float, Int
 from torch import Tensor as TT
+from tqdm.auto import tqdm
 from transformers import (  # type: ignore
     AutoModelForCausalLM,
-    AutoTokenizer,
+    AutoTokenizer, 
     Trainer,
     TrainingArguments,
 )
 from trl import DPOTrainer  # type: ignore
 
-from gpt import DenseGPTConfig, DenseGPTForCausalLM
+from utils import tokenize
 
 with open("params.yaml") as f:
     params = yaml.safe_load(f)
@@ -25,26 +26,19 @@ print(params)
 model_name = params["model_name"]
 dataset_name = params["dataset_name"]
 tokenizer_name = params["tokenizer_name"]
-use_dense = params["use_dense"]
 lr = params["lr"]
 batch_size = params["batch_size"]
 dataset_size = params["dataset_size"]
+beta = params["beta"]
+max_steps = params["max_steps"]
 
 tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
+tokenizer.padding_side = "left"
 
-config = DenseGPTConfig(
-    vocab_size=len(tokenizer),
-    hidden_size=256,
-    num_layers=8,
-    attention_types=[[["global"], 8]],
-    num_heads=16,
-    use_dense=use_dense,
-)
-if not model_name:
-    model = DenseGPTForCausalLM(config)
-else:
-    model = DenseGPTForCausalLM.from_pretrained(model_name, config=config)
+device = "cuda" if t.cuda.is_available() else "cpu"
+model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
+ref_model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
 
 dataset = load_dataset(dataset_name)
 
@@ -67,45 +61,12 @@ else:
         return result
 
 
-subset = dataset["train"].select(range(dataset_size)).to_iterable_dataset()
-tokenized = subset.map(tokenize_function, batched=True).remove_columns(["text"])
+subset = dataset["train"].select(range(dataset_size))
 
-training_args = TrainingArguments(
-    output_dir="trainer",
-    per_device_train_batch_size=batch_size,
-    learning_rate=lr,
-    logging_steps=50,
-    num_train_epochs=1,
-    max_steps=dataset_size // batch_size,
-    save_total_limit=1,
-    report_to="none",
-)
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=tokenized,
-)
-trainer.add_callback(DVCLiveCallback())
-trainer.train()
-
-"""
-train_dataset = Dataset.from_dict({
-    "prompt": [
-        "hello",
-        "how are you",
-    ],
-    "chosen": [
-        "hi nice to meet you",
-        "I am fine",
-    ],
-    "rejected": [
-        "leave me alone",
-        "I am not fine",
-    ],
-})
-"""
+dataloader = t.utils.data.DataLoader(subset, batch_size=batch_size)
 
 
+# %%
 def dpo(
     prompt_chosen_rejected: dict[str, list[str]],
     model: AutoModelForCausalLM,
@@ -117,7 +78,6 @@ def dpo(
     loss_type: Literal["sigmoid", "ipo"] = "ipo",
 ):
     train_dataset = Dataset.from_dict(prompt_chosen_rejected)
-    max_steps = 100
 
     training_args = TrainingArguments(
         per_device_train_batch_size=batch_size,
@@ -125,12 +85,10 @@ def dpo(
         num_train_epochs=100,
         remove_unused_columns=False,
         learning_rate=lr,
-        evaluation_strategy="steps",
         logging_first_step=True,
-        logging_steps=10,
         output_dir="trainer",
         optim="adamw_torch",
-        warmup_steps=15,
+        warmup_steps=2,
         report_to="none",
         save_total_limit=1,
         # bf16=True,
@@ -138,26 +96,48 @@ def dpo(
 
     dpo_trainer = DPOTrainer(
         model,
-        # ref_model,
+        ref_model=ref_model,
         args=training_args,
         beta=beta,
         loss_type=loss_type,
         train_dataset=train_dataset,
         tokenizer=tokenizer,
-        max_length=128,
-        max_target_length=128,
-        max_prompt_length=128,
     )
 
     dpo_trainer.train()
 
 
-"""
-Plan:
-Take TinyStories texts as positive examples, model generated texts as negative (pairing them arbitrarily) and set prompts to be empty, or some fixed string.
+for batch in tqdm(dataloader):
+    prompts = [s.split()[0] for s in batch["text"]]
+    tokenized_prompts = tokenizer(
+        prompts, return_tensors="pt", padding=True, truncation=True, max_length=4
+    ).to(device)
+    tokenized_generations = model.generate(
+        **tokenized_prompts,
+        do_sample=True,
+        max_new_tokens=128,
+    )
+    generations = tokenizer.batch_decode(
+        tokenized_generations, skip_special_tokens=True
+    )
+    chosen = [s[len(p) :] for s, p in zip(batch["text"], prompts)]
+    rejected = [s[len(p) :] for s, p in zip(generations, prompts)]
+    current_dataset = {
+        "prompt": prompts,
+        "chosen": chosen,
+        "rejected": rejected,
+    }
 
-For several epochs:
-    Run DPO
-    Updated some (e.g. each with probability 0.1) of the generated texts with new ones
-    Observe what happens to average loss on dataset samples, on self-generated samples and on corrupted dataset samples (which should indicate how stable the model is)
-"""
+    with open("log.txt", "w") as f:
+        json.dump(current_dataset, f, indent=2)
+
+    dpo(
+        current_dataset,
+        model=model,
+        tokenizer=tokenizer,
+        batch_size=batch_size,
+        lr=lr,
+        beta=beta,
+        max_steps=max_steps,
+        loss_type="sigmoid",
+    )
