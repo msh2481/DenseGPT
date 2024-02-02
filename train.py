@@ -12,7 +12,7 @@ from torch import Tensor as TT
 from tqdm.auto import tqdm
 from transformers import (  # type: ignore
     AutoModelForCausalLM,
-    AutoTokenizer, 
+    AutoTokenizer,
     Trainer,
     TrainingArguments,
 )
@@ -107,7 +107,7 @@ def dpo(
     dpo_trainer.train()
 
 
-for batch in tqdm(dataloader):
+for it, batch in enumerate(dataloader):
     prompts = [s.split()[0] for s in batch["text"]]
     tokenized_prompts = tokenizer(
         prompts, return_tensors="pt", padding=True, truncation=True, max_length=4
@@ -141,3 +141,6 @@ for batch in tqdm(dataloader):
         max_steps=max_steps,
         loss_type="sigmoid",
     )
+
+    if it % 10 == 0:
+        model.save_pretrained("model")
